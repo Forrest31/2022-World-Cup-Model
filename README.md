@@ -10,7 +10,7 @@ The repository contains two R markdown files:
 #### 1. Creating, Training and Validating Model (WorldCup2022UpdatedELO)
 The XG Boost model is trained on over 6,000 international friendly, world cup qualifying, and world cup tournament matches between 2010-2022 using data provided via the WorldfootballR package. As a logit model, its output is the probability of the each team winning or a draw.
 
-#### 2. Deploying the Model for Upcoming Games (Daily Run for Baseball Picks)
+#### 2. Deploying the Model for Upcoming Games (WorldCupPredictionsFinal)
 This file allows the user to deploy the model against the day’s games after entering the teams playing one another and the posted odds for each team winning. The output is a csv file which shows the “edge” of each pick as defined by the implied probability of the given odds to win minus the probability of winning provided by the model. 
 
 ### Data Collection
@@ -39,8 +39,6 @@ In addition to the collected data, I added variables to measure:
 2. Differences in historical winning percentages of the teams, 
 3. Created an average goals for and against,
 4. An interactive variable between a team’s goals scored and the opponent’s goals allowed.  
-
-
 
 ### Model Creation
 I perform cross validation to determine the optimal number of trees to train. Because there are 3 possible outcomes in a soccer match, I used a 'softprob' objective function and set the number of classes equal to 3. 
