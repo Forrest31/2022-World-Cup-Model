@@ -1,0 +1,403 @@
+---
+title: "World Cup Prediction Model"
+author: "Forrest Allen"
+date: '2022-10-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(worldfootballR)
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(dplyr)
+library(xgboost)
+library(caret)
+library(SHAPforxgboost)
+```
+
+```{r}
+comps <- c("FIFA World Cup","FIFA World Cup Qualification — AFC","FIFA World Cup Qualification — CAF","FIFA World Cup Qualification — CONCACAF","FIFA World Cup Qualification — CONMEBOL","FIFA World Cup Qualification — Inter-confederation play-offs","FIFA World Cup Qualification — OFC","FIFA World Cup Qualification — UEFA","International Friendlies (M)", "AFC Asian Cup", "AFC Asian Cup qualification",  "Africa Cup of Nations", "Africa Cup of Nations qualification",   "CONCACAF Gold Cup"  , "Copa America", "European Championship", "FIFA Confederations Cup",  "OFC Nations Cup", "UEFA Euro Qualification", "UEFA Nations League")
+
+world_cups<-load_match_comp_results(comp_name = comps)
+
+recent_cups<- world_cups %>%
+  filter(Season_End_Year >= 2010)%>%
+  drop_na(HomeGoals)
+
+#remove suffixes and prefixes
+recent_cups$Home<-str_sub(recent_cups$Home,  end = -4)
+recent_cups$Home<-gsub(' ', '',recent_cups$Home, fixed = TRUE)
+recent_cups$Away<-str_sub(recent_cups$Away, 4)
+recent_cups$Away<-gsub(' ', '',recent_cups$Away, fixed = TRUE)
+
+```
+
+```{r Fix countries}
+
+#fix country names
+
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"IRIran","Iran"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"DominicanRep.","DominicanRepublic"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"N.Macedonia","Macedonia"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"NorthMacedonia","Macedonia"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"RepublicofIreland","Ireland"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"Rep.ofIreland","Ireland"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"Bosnia&Herz'na","BosniaandHerzegovina"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"BruneiDarussalam","Brunei"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"UAE","UnitedArabEmirates"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"ChineseTaipei","Taiwan"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"DemocraticRepublicofCongo","Congo"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"CongoDR","Congo"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"SãoToméandPríncipe","SãoTomé"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"EquatorialGuinea","Equ.Guinea"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"CentralAfricanRepublic","CAR"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"ChinaPR","China"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"American Samoa","Samoa"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"AmericanSamoa","Samoa"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"SaintVincentandtheGrenadines","St.Vincent"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"St.VincentandtheGrenadines","St.Vincent"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"TurksandCaicosIslands","Turks&Caicos"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"DominicanRepublicblic","DominicanRepublic"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"BritishVirginIslands","BVI"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"AntiguaandBarbuda","Antigua"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"Trin&Tobago","TrinidadandTobago"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"St.Kitts&Nevis","St.KittsandNevis"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"PapuaNG","PapuaNewGuinea"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"nchGuiana","FrenchGui"))
+recent_cups <- recent_cups%>%
+  mutate(Home = str_replace(Home,"Mauritius","Mauritania"))
+
+#apply to away teams
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"IRIran","Iran"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"DominicanRep.","DominicanRepublic"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"N.Macedonia","Macedonia"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"NorthMacedonia","Macedonia"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"RepublicofIreland","Ireland"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"Rep.ofIreland","Ireland"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"Bosnia&Herz'na","BosniaandHerzegovina"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"BruneiDarussalam","Brunei"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"UAE","UnitedArabEmirates"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"ChineseTaipei","Taiwan"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"DemocraticRepublicofCongo","Congo"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"CongoDR","Congo"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"SãoToméandPríncipe","SãoTomé"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"EquatorialGuinea","Equ.Guinea"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"CentralAfricanRepublic","CAR"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"ChinaPR","China"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"American Samoa","Samoa"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"AmericanSamoa","Samoa"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"SaintVincentandtheGrenadines","St.Vincent"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"St.VincentandtheGrenadines","St.Vincent"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"TurksandCaicosIslands","Turks&Caicos"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"DominicanRepublicblic","DominicanRepublic"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"BritishVirginIslands","BVI"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"AntiguaandBarbuda","Antigua"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"Trin&Tobago","TrinidadandTobago"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"St.Kitts&Nevis","St.KittsandNevis"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"PapuaNG","PapuaNewGuinea"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"nchGuiana","FrenchGui"))
+recent_cups <- recent_cups%>%
+  mutate(Away = str_replace(Away,"Mauritius","Mauritania"))
+
+```
+
+```{r Create Lookup Key for join with Elo Data}
+#remove () from international friendly competition name
+recent_cups$Competition_Name<-gsub('International Friendlies (M)', 'Friendlies',recent_cups$Competition_Name, fixed = TRUE)
+
+#lookup key will be a concatenation of year, event, and country
+recent_cups$Home_Key<-paste(recent_cups$Season_End_Year,recent_cups$Competition_Name,recent_cups$Home)
+recent_cups$Home_Key<-gsub(' ', '',recent_cups$Home_Key, fixed = TRUE)
+recent_cups$Away_Key<-paste(recent_cups$Season_End_Year,recent_cups$Competition_Name,recent_cups$Away)
+recent_cups$Away_Key<-gsub(' ', '',recent_cups$Away_Key, fixed = TRUE)
+
+```
+
+Because of the possibility of a win, loss, or draw in soccer, the dependent variable must be a multiclass, rather than a binary variable. 
+```{r Create Dependent Variable}
+#create win, lose, or draw outcome variable for each match
+#0 is home win, 1 is home loss, 2 is draw
+recent_cups$Outcome<-ifelse(recent_cups$HomeGoals > recent_cups$AwayGoals, 0,
+                           ifelse(recent_cups$HomeGoals < recent_cups$AwayGoals,1,2))
+```
+
+```{r Import and Join Elo Ratings Data}
+elo_ratings<- read_csv("UpdatedEloRatingsIntlFootball.csv", show_col_types = FALSE)
+on.exit(close(elo_ratings, add=TRUE))
+
+elo_ratings$`Lookup Key`<-gsub(' ', '',elo_ratings$`Lookup Key`, fixed = TRUE)
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"Bosnia/Herzeg","BosniaandHerzegovina"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"Swaziland","Eswatini"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"DemocraticRepublicofCongo","Congo"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"CongoDR","Congo"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"SãoToméandPríncipe","SãoTomé"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"CentralAfricanRepublic","CAR"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"NetherlandsAntilles","Curaçao"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"NorthMacedonia","Macedonia"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"N.Macedonia","Macedonia"))
+
+elo_ratings <- elo_ratings%>%
+  mutate(`Lookup Key` = str_replace(`Lookup Key`,"NorthMacedonia","Macedonia"))
+
+elo_ratings$Home_Key<-elo_ratings$`Lookup Key`
+elo_ratings$Home_Key<-gsub(' ', '',elo_ratings$Home_Key, fixed = TRUE)
+elo_ratings$Away_Key<-elo_ratings$`Lookup Key`
+elo_ratings$Away_Key<-gsub(' ', '',elo_ratings$Away_Key, fixed = TRUE)
+```
+
+
+```{r}
+#join data
+matches_ratings<-recent_cups %>%
+  left_join(elo_ratings, by = "Home_Key")
+
+#remove duplicate columns
+matches_ratings <- select(matches_ratings, -ends_with(".y"))
+
+matches_ratings<-matches_ratings%>%
+  rename_with(~str_remove(.,'.x'))
+
+#join data
+matches_ratings<-matches_ratings %>%
+  left_join(elo_ratings, by = "Away_Key")
+```
+
+```{r}
+#rename columns for home team
+
+matches_ratings<-matches_ratings%>%
+  rename(
+    HmLocalRank = `Local Rank.x`,
+    HmGlobalRank = `Global Rank.x`,
+    HmRating = `Rating.x`,
+    HmAvgGlobalRank =`Avg Rank.x`,
+    HmAvgRating = `Avg Rating.x`,
+    Hm1yrChangeGlobalRank = `1 yr Change Rank.x`,
+    Hm1yrChangeRating = `1 year change Rating.x`, 
+    HmTotalMatches = `Total Matches.x`,
+    HmWins = `Wins.x`,
+    HmLosses = `Losses.x`,
+    HmDraws = `Draws.x`,
+    HmGoalsFor = `Goals For.x`,
+    HmGoalsAgainst = `Goals Against.x`)
+
+#rename columns for home team
+matches_ratings<-matches_ratings%>%
+  rename(
+    AwayLocalRank = `Local Rank.y`,
+    AwayGlobalRank = `Global Rank.y`,
+    AwayRating = `Rating.y`,
+    AwayAvgGlobalRank =`Avg Rank.y`,
+    AwayAvgRating = `Avg Rating.y`,
+    Away1yrChangeGlobalRank = `1 yr Change Rank.y`,
+    Away1yrChangeRating = `1 year change Rating.y`, 
+    AwayTotalMatches = `Total Matches.y`,
+    AwayWins = `Wins.y`,
+    AwayLosses = `Losses.y`,
+    AwayDraws = `Draws.y`,
+    AwayGoalsFor = `Goals For.y`,
+    AwayGoalsAgainst = `Goals Against.y`)
+
+matches_ratings$Date[is.na(matches_ratings$Date)]<-as.Date("2011-11-21")
+
+matches_ratings<-matches_ratings%>%
+  select(-Gender, -Country, -Round, -Wk, -Day, -Time, -Attendance, -Venue, -Referee, -Notes, -MatchURL, -HomeG, -AwayG, -Competition_Name, -Season_End_Year, -Date, -ends_with(".x"), -ends_with(".y"), -Away_Key, -`Fed Date`, -`Fixed Date`, -HomeGoals, -AwayGoals)
+
+```
+
+```{r}
+matches_ratings$diff_rating<-matches_ratings$HmRating - matches_ratings$AwayRating
+matches_ratings$diff_globerank<-matches_ratings$HmGlobalRank - matches_ratings$AwayAvgGlobalRank
+matches_ratings$diff_avg_rating<-matches_ratings$HmAvgRating - matches_ratings$AwayLocalRank
+matches_ratings$diff_1yr_change_rating <- matches_ratings$Hm1yrChangeRating - matches_ratings$Away1yrChangeRating
+matches_ratings$diff_1yr_change_globerank<- matches_ratings$Hm1yrChangeGlobalRank - matches_ratings$Away1yrChangeGlobalRank
+matches_ratings$HmAvgGoalsFor<-matches_ratings$HmGoalsFor / matches_ratings$HmTotalMatches
+matches_ratings$AwayAvgGoalsFor<-matches_ratings$AwayGoalsFor / matches_ratings$AwayTotalMatches
+matches_ratings$HmAvgGoalsAgainst <- matches_ratings$HmGoalsAgainst / matches_ratings$HmTotalMatches
+matches_ratings$AwayAvgGoalsAgainst <- matches_ratings$AwayGoalsAgainst / matches_ratings$AwayTotalMatches
+matches_ratings$HmGoalForInteract <- (matches_ratings$HmAvgGoalsFor + matches_ratings$AwayAvgGoalsAgainst) / 2
+matches_ratings$AwayGoalForInteract <- (matches_ratings$AwayAvgGoalsFor + matches_ratings$HmAvgGoalsAgainst) / 2
+matches_ratings$diff_win_pct <- (matches_ratings$HmWins / matches_ratings$HmTotalMatches) - 
+  (matches_ratings$AwayWins / matches_ratings$AwayTotalMatches)
+matches_ratings$diff_loss_pct <- (matches_ratings$HmLosses / matches_ratings$HmTotalMatches) - 
+  (matches_ratings$AwayLosses / matches_ratings$AwayTotalMatches)
+matches_ratings$diff_localrank<- matches_ratings$HmLocalRank - matches_ratings$AwayLocalRank
+```
+
+
+```{r}
+model_data<-unique(matches_ratings)
+
+#pull out dependent variable from dataset
+
+df_train_y = model_data %>% pull("Outcome") 
+df_train_x = model_data %>% select(-c(("Outcome")))
+
+#create test and train including DV
+all_train<-model_data
+
+
+# creating test and training sets excluding DV
+x_train <- df_train_x
+
+
+# creating test and training sets for y
+y_train <- df_train_y
+
+```
+
+
+```{r Fit XGBoost Model}
+#create test and training sets and dependent variable vectors
+xgb_train<-data.matrix(x_train)
+
+xgb_train_dv<-y_train
+
+
+#create DMatrix objects required for XGBoost
+xgb_train_DMatrix<-xgb.DMatrix(data = xgb_train, label = xgb_train_dv)
+
+
+numberofClasses<-length(unique(model_data$Outcome))
+
+params<-list(booster = "gbtree", objective = "multi:softprob",eta=0.1, 
+             gamma=0, max_depth=10, min_child_weight=1, 
+             subsample=1, colsample_bytree=1, 
+             eval_metric = "mlogloss", num_class = numberofClasses)
+
+#perform cross validation to determine the optimal number of trees to train
+cv3<-xgb.cv(params = params, data = xgb_train_DMatrix, nrounds = 200, nfold = 5, showsd = T, stratified = T, print_every_n = 10, early_stopping_rounds = 20, maximize = F, prediction = TRUE)
+
+xgb3<- xgb.train(params = params, data = xgb_train_DMatrix, nrounds = cv3$best_iteration, 
+                           watchlist = list(train=xgb_train_DMatrix), print_every_n = 5, 
+                           early_stopping_rounds = 20, maximize = F)
+```
+
+```{r Create Test Data}
+last_matches<- read_csv("22 World Cup Last Test Set 12.14.22.csv", show_col_types = FALSE)
+
+last_matches$Outcome<-rep(4)
+
+df_test_y = last_matches %>% pull("Outcome") 
+df_test_x = last_matches %>% select(-c(("Outcome")))
+
+all_test<-last_matches
+x_test_pred <- df_test_x
+y_test_pred <- df_test_y
+xgb_test_pred<-data.matrix(x_test_pred)
+xgb_test_dv_pred<-y_test_pred
+xgb_test_pred_DMatrix<-xgb.DMatrix(data = as.matrix(xgb_test_pred), label = xgb_test_dv_pred)
+
+#model prediction
+xgbpred <- predict (xgb3, xgb_test_pred_DMatrix)
+
+
+last_prediction <- matrix(xgbpred, nrow = numberofClasses,
+                          ncol=length(xgbpred)/numberofClasses) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(max_prob = max.col(., "last"))
+
+```
+
+```{r}
+last_prediction<-cbind(last_matches[1:2],last_prediction)
+
+last_prediction<-last_prediction[complete.cases(last_prediction), ]
+
+colnames(last_prediction)<-c("Home", "Away", "HmModelProb", "VisModelProb", "DrawModelProb", "Prediction")
+
+last_prediction<-last_prediction[order(last_prediction$Home), ]
+ 
+```
+
+```{r}
+last_odds <- read_csv("22 World Cup Last Odds 12.14.22.csv", show_col_types = FALSE)
+
+last_odds<- last_odds[order(last_odds$Home), ]
+```
+
+```{r}
+final_pred<-cbind(last_prediction, last_odds[9:11])
+write.csv(final_pred, "WorldCup22lastfinalPrediction12.14.22.csv")
+```
+
